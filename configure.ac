@@ -1883,6 +1883,7 @@ tools/gpg-zip
 tools/Makefile
 doc/Makefile
 tests/Makefile
+tests/gpgscm/Makefile
 tests/openpgp/Makefile
 tests/pkits/Makefile
 g10/gpg.w32-manifest
