@@ -22,9 +22,11 @@
 # Programs required before we can run these tests.
 required_pgms = ../../g10/gpg2$(EXEEXT) ../../agent/gpg-agent$(EXEEXT) \
                 ../../tools/gpg-connect-agent$(EXEEXT) \
-		../../tools/mk-tdata$(EXEEXT)
+		../../tools/mk-tdata$(EXEEXT) \
+		../gpgscm/gpgscm$(EXEEXT)
 
-TESTS_ENVIRONMENT = GNUPGHOME=$(abs_builddir) GPG_AGENT_INFO= LC_ALL=C
+TESTS_ENVIRONMENT = GNUPGHOME=$(abs_builddir) GPG_AGENT_INFO= LC_ALL=C \
+	PATH=../gpgscm:$(PATH) GPGSCM_BASE=$(top_srcdir)/tests/gpgscm
 
 if SQLITE3
 sqlite3_dependent_tests = tofu.test
@@ -34,7 +36,7 @@ endif
 
 # Note: version.test needs to be the first test to run and finish.test
 # the last one
-TESTS = version.test mds.test \
+TESTS = version.test mds.scm \
 	decrypt.test decrypt-dsa.test \
 	sigs.test sigs-dsa.test \
 	encrypt.test encrypt-dsa.test  \
@@ -45,7 +47,7 @@ TESTS = version.test mds.test \
 	armdetachm.test detachm.test genkey1024.test \
 	conventional.test conventional-mdc.test \
 	multisig.test verify.test armor.test \
-	import.test ecc.test 4gb-packet.test \
+	import.test ecc.test 4gb-packet.scm \
 	$(sqlite3_dependent_tests) \
 	gpgtar.test use-exact-key.test default-key.test \
 	finish.test
