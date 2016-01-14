@@ -233,12 +233,34 @@ build_w32_commandline (const char *pgmname, const char * const *argv,
 }
 
 
-/* Create pipe where one end is inheritable: With an INHERIT_IDX of 0
-   the read end is inheritable, with 1 the write end is inheritable.  */
-static int
-create_inheritable_pipe (HANDLE filedes[2], int inherit_idx)
+static BOOL
+duplicate_handle (HANDLE source, HANDLE *target)
 {
-  HANDLE r, w, h;
+  BOOL ok;
+  HANDLE new;
+
+  ok = DuplicateHandle (GetCurrentProcess (), source,
+                        GetCurrentProcess (), &new,
+                        0,	/* access */
+                        TRUE,	/* inherit? */
+                        DUPLICATE_SAME_ACCESS);
+  if (ok)
+    {
+      CloseHandle (source);
+      *target = new;
+    }
+  return ok;
+}
+
+#define INHERIT_READ	1
+#define INHERIT_WRITE	2
+#define INHERIT_BOTH	(INHERIT_READ|INHERIT_WRITE)
+
+/* Create pipe.  FLAGS indicates which ends are inheritable.  */
+static int
+create_inheritable_pipe (HANDLE filedes[2], int flags)
+{
+  HANDLE r, w;
   SECURITY_ATTRIBUTES sec_attr;
 
   memset (&sec_attr, 0, sizeof sec_attr );
@@ -248,30 +270,23 @@ create_inheritable_pipe (HANDLE filedes[2], int inherit_idx)
   if (!CreatePipe (&r, &w, &sec_attr, 0))
     return -1;
 
-  if (!DuplicateHandle (GetCurrentProcess(), inherit_idx? w : r,
-                        GetCurrentProcess(), &h, 0,
-                        TRUE, DUPLICATE_SAME_ACCESS ))
-    {
-      log_error ("DuplicateHandle failed: %s\n", w32_strerror (-1));
-      CloseHandle (r);
-      CloseHandle (w);
-      return -1;
-    }
+  if (flags & INHERIT_READ)
+    if (! duplicate_handle (r, &r))
+      goto fail;
 
-  if (inherit_idx)
-    {
-      CloseHandle (w);
-      w = h;
-    }
-  else
-    {
-      CloseHandle (r);
-      r = h;
-    }
+  if (flags & INHERIT_WRITE)
+    if (! duplicate_handle (r, &r))
+      goto fail;
 
   filedes[0] = r;
   filedes[1] = w;
   return 0;
+
+ fail:
+  log_error ("DuplicateHandle failed: %s\n", w32_strerror (-1));
+  CloseHandle (r);
+  CloseHandle (w);
+  return -1;
 }
 
 
@@ -291,14 +306,14 @@ w32_open_null (int for_write)
 
 
 static gpg_error_t
-do_create_pipe (int filedes[2], int inherit_idx)
+do_create_pipe (int filedes[2], int flags)
 {
   gpg_error_t err = 0;
   HANDLE fds[2];
 
   filedes[0] = filedes[1] = -1;
   err = gpg_error (GPG_ERR_GENERAL);
-  if (!create_inheritable_pipe (fds, inherit_idx))
+  if (!create_inheritable_pipe (fds, flags))
     {
       filedes[0] = _open_osfhandle (handle_to_fd (fds[0]), 0);
       if (filedes[0] == -1)
@@ -328,7 +343,7 @@ do_create_pipe (int filedes[2], int inherit_idx)
 gpg_error_t
 gnupg_create_inbound_pipe (int filedes[2])
 {
-  return do_create_pipe (filedes, 1);
+  return do_create_pipe (filedes, INHERIT_WRITE);
 }
 
 
@@ -337,7 +352,16 @@ gnupg_create_inbound_pipe (int filedes[2])
 gpg_error_t
 gnupg_create_outbound_pipe (int filedes[2])
 {
-  return do_create_pipe (filedes, 0);
+  return do_create_pipe (filedes, INHERIT_READ);
+}
+
+
+/* Portable function to create a pipe.  Under Windows both ends are
+   inheritable.  */
+gpg_error_t
+gnupg_create_pipe (int filedes[2])
+{
+  return do_create_pipe (filedes, INHERIT_BOTH);
 }
 
 
