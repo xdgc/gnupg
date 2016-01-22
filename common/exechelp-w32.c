@@ -795,8 +795,11 @@ gnupg_spawn_process_detached (const char *pgmname, const char *argv[],
   /* Start the process.  */
   memset (&si, 0, sizeof si);
   si.cb = sizeof (si);
-  si.dwFlags = STARTF_USESHOWWINDOW;
+  si.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
   si.wShowWindow = DEBUG_W32_SPAWN? SW_SHOW : SW_MINIMIZE;
+  si.hStdInput  = w32_open_null (0);
+  si.hStdOutput = w32_open_null (1);
+  si.hStdError  = w32_open_null (1);
 
   cr_flags = (CREATE_DEFAULT_ERROR_MODE
               | GetPriorityClass (GetCurrentProcess ())
@@ -808,7 +811,7 @@ gnupg_spawn_process_detached (const char *pgmname, const char *argv[],
                       cmdline,       /* Command line arguments.  */
                       &sec_attr,     /* Process security attributes.  */
                       &sec_attr,     /* Thread security attributes.  */
-                      FALSE,         /* Inherit handles.  */
+                      TRUE,          /* Inherit handles.  */
                       cr_flags,      /* Creation flags.  */
                       NULL,          /* Environment.  */
                       NULL,          /* Use current drive/directory.  */
@@ -828,6 +831,9 @@ gnupg_spawn_process_detached (const char *pgmname, const char *argv[],
 /*              pi.hProcess, pi.hThread, */
 /*              (int) pi.dwProcessId, (int) pi.dwThreadId); */
 
+  CloseHandle (si.hStdInput);
+  CloseHandle (si.hStdOutput);
+  CloseHandle (si.hStdError);
   CloseHandle (pi.hThread);
 
   return 0;
