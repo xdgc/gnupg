@@ -835,6 +835,7 @@ gnupg_spawn_process_detached (const char *pgmname, const char *argv[],
   CloseHandle (si.hStdOutput);
   CloseHandle (si.hStdError);
   CloseHandle (pi.hThread);
+  CloseHandle (pi.hProcess);
 
   return 0;
 }
