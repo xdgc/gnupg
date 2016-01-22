@@ -24,6 +24,15 @@ required_pgms = ../../g10/gpg2$(EXEEXT) ../../agent/gpg-agent$(EXEEXT) \
                 ../../tools/gpg-connect-agent$(EXEEXT) \
 		../../tools/mk-tdata$(EXEEXT)
 
+AM_CPPFLAGS = -I$(top_srcdir)/common
+include $(top_srcdir)/am/cmacros.am
+
+AM_CFLAGS =
+
+noinst_PROGRAMS = fake-pinentry
+
+fake_pinentry_SOURCES = fake-pinentry.c
+
 TESTS_ENVIRONMENT = GNUPGHOME=$(abs_builddir) GPG_AGENT_INFO= LC_ALL=C
 
 if SQLITE3
