@@ -1,0 +1,23 @@
+@echo off
+cd /d d:\
+
+set TARGET=gnupg-test
+
+set GNUPGHOME=c:/%TARGET%/tests/openpgp
+c:/%TARGET%/gpg-connect-agent.exe killagent /bye
+rem is there a nicer way to sleep?
+ping -n 1 localhost > nul
+set GNUPGHOME=
+
+rmdir /q /s c:\%TARGET%
+mkdir c:\%TARGET%
+xcopy /q /s d:\gnupg c:\%TARGET%
+
+cd /d c:\%TARGET%\tests\openpgp
+
+set GPGSCM_BASE=c:/%TARGET%/tests/gpgscm
+set EXEEXT=.exe
+set srcdir=c:/%TARGET%/tests/openpgp
+set BIN_PREFIX=c:/%TARGET%
+
+c:\%TARGET%\gpgscm.exe --verbose run-tests.scm
