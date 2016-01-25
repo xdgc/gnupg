@@ -278,9 +278,8 @@ do_close (scheme *sc, pointer args)
   SC_RETURN_ERR (sc, close (fd) == 0 ? 0 : gpg_error_from_syserror ());
 }
 
-/* XXX avoid mktemp.  */
 static pointer
-do_mktemp (scheme *sc, pointer args)
+do_mkdtemp (scheme *sc, pointer args)
 {
   SC_FFI_PROLOG ();
   char *template;
@@ -292,7 +291,7 @@ do_mktemp (scheme *sc, pointer args)
     SC_RETURN_ERR (sc, EINVAL);
   strncpy (buffer, template, sizeof buffer);
 
-  SC_RETURN_STRING (sc, mktemp (buffer));
+  SC_RETURN_STRING (sc, gnupg_mkdtemp (buffer));
 }
 
 static pointer
@@ -796,7 +795,7 @@ ffi_init (scheme *sc)
   define_function (sc, exit);
   define_function (sc, open);
   define_function (sc, close);
-  define_function (sc, mktemp);
+  define_function (sc, mkdtemp);
   define_function (sc, unlink);
   define_function (sc, getcwd);
   define_function (sc, mkdir);

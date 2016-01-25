@@ -174,8 +174,13 @@
 	       ,(if (= 1 (length (cadr form)))
 		    `(begin ,@(cddr form))
 		    `(lettmp ,(cdadr form) ,@(cddr form)))))
-	  (catch #t (unlink ,(caadr form)))
-	  ,result-sym)) (mktemp "gpgscm-XXXXXX"))))
+	  (catch #t
+	    (let* ((filename ,(caadr form))
+		   (len (string-length filename))
+		   (dirname (substring 0 (- len 2))))
+	      (unlink filename)
+	      (rmdir dirname)))
+	  ,result-sym)) (string-append (mkdtemp "gpgscm-XXXXXX") "/a"))))
 
 (define (check-execution source transformer)
   (lettmp (sink)
