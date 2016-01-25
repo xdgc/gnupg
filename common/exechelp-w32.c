@@ -296,7 +296,7 @@ do_create_pipe (int filedes[2], int flags)
   err = gpg_error (GPG_ERR_GENERAL);
   if (!create_inheritable_pipe (fds, flags))
     {
-      filedes[0] = _open_osfhandle (handle_to_fd (fds[0]), 0);
+      filedes[0] = _open_osfhandle (handle_to_fd (fds[0]), O_RDONLY);
       if (filedes[0] == -1)
         {
           log_error ("failed to translate osfhandle %p\n", fds[0]);
@@ -304,7 +304,7 @@ do_create_pipe (int filedes[2], int flags)
         }
       else
         {
-          filedes[1] = _open_osfhandle (handle_to_fd (fds[1]), 1);
+          filedes[1] = _open_osfhandle (handle_to_fd (fds[1]), O_APPEND);
           if (filedes[1] == -1)
             {
               log_error ("failed to translate osfhandle %p\n", fds[1]);
