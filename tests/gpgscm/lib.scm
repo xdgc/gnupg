@@ -65,9 +65,27 @@
 (define (string-split haystack delimiter)
   (string-splitn haystack delimiter -1))
 
-;; Drop whitespace.
-(define (filter-whitespace s)
-  (list->string (filter (lambda (c) (not (char=? #\newline c))) (string->list s))))
+;; Trim the prefix of S containing only characters that make PREDICATE
+;; true.  For example (string-ltrim char-whitespace? "  foo") =>
+;; "foo".
+(define (string-ltrim predicate s)
+  (let loop ((s' (string->list s)))
+    (if (predicate (car s'))
+	(loop (cdr s'))
+	(list->string s'))))
+
+;; Trim the suffix of S containing only characters that make PREDICATE
+;; true.
+(define (string-rtrim predicate s)
+  (let loop ((s' (reverse (string->list s))))
+    (if (predicate (car s'))
+	(loop (cdr s'))
+	(list->string (reverse s')))))
+
+;; Trim both the prefix and suffix of S containing only characters
+;; that make PREDICATE true.
+(define (string-trim predicate s)
+  (string-ltrim predicate (string-rtrim predicate s)))
 
 (define (echo . msg)
   (for-each (lambda (x) (display x) (display " ")) msg)

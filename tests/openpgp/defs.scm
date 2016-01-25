@@ -76,7 +76,7 @@
   (let* ((config-string
 	  (call-popen `(,GPG --with-colons --list-config ,what) ""))
 	 (config (string-splitn
-		  (filter-whitespace config-string) #\: 2)))
+		  (string-rtrim char-whitespace? config-string) #\: 2)))
     (string-split (caddr config) #\;)))
 
 (define all-pubkey-algos (get-config "pubkeyname"))
