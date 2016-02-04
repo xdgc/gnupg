@@ -739,9 +739,10 @@ gnupg_wait_processes (const char **pgmnames, pid_t *pids, size_t count,
             }
           else if (exc)
             {
-              log_error (_("error running '%s': exit status %d\n"),
-                         pgmnames[i], (int)exc );
-              if (r_exitcodes)
+              if (!r_exitcodes)
+                log_error (_("error running '%s': exit status %d\n"),
+                           pgmnames[i], (int)exc );
+              else
                 r_exitcodes[i] = (int)exc;
               ec = GPG_ERR_GENERAL;
             }
