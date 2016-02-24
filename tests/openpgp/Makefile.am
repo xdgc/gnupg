@@ -36,7 +36,9 @@ fake_pinentry_SOURCES = fake-pinentry.c
 
 TESTS_ENVIRONMENT = GNUPGHOME=$(abs_builddir) GPG_AGENT_INFO= LC_ALL=C \
 	EXEEXT=$(EXEEXT) \
-	PATH=../gpgscm:$(PATH) GPGSCM_PATH=$(top_srcdir)/tests/gpgscm:$(top_srcdir)/tests/openpgp
+	PATH=../gpgscm:$(PATH) \
+	objdir=$(shell readlink -f ../..) \
+	GPGSCM_PATH=$(top_srcdir)/tests/gpgscm:$(top_srcdir)/tests/openpgp
 
 if SQLITE3
 sqlite3_dependent_tests = tofu.test

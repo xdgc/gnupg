@@ -1,6 +1,5 @@
 #!/usr/bin/env gpgscm
 
-(echo (getenv "GPGSCM_PATH"))
 (load (with-path "defs.scm"))
 
 (echo "Creating test environment...")
@@ -25,10 +24,10 @@
  '("gpg.conf" "gpg-agent.conf"))
 
 (echo "Starting gpg-agent...")
-(call `(,(tool 'gpg-connect-agent) --verbose
-	,(string-append "--agent-program=" (tool 'gpg-agent)
-			"|--debug-quick-random")
-	/bye))
+(call-check `(,(tool 'gpg-connect-agent) --verbose
+	      ,(string-append "--agent-program=" (tool 'gpg-agent)
+			      "|--debug-quick-random")
+	      /bye))
 
 (for-each-p "Creating sample data files"
   (lambda (size)
