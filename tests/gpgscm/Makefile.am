@@ -53,5 +53,5 @@ $(PROGRAMS): $(common_libs)
 
 .PHONY: check
 check: gpgscm$(EXEEXT) t-child$(EXEEXT)
-	EXEEXT=$(EXEEXT) ./gpgscm$(EXEEXT) --base $(srcdir) \
-		$(srcdir)/t-child.scm
+	EXEEXT=$(EXEEXT) GPGSCM_PATH=$(srcdir) \
+		./gpgscm$(EXEEXT) $(srcdir)/t-child.scm
