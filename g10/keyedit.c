@@ -83,6 +83,7 @@ static int menu_revkey( KBNODE pub_keyblock, KBNODE sec_keyblock );
 static int menu_revsubkey( KBNODE pub_keyblock, KBNODE sec_keyblock );
 static int enable_disable_key( KBNODE keyblock, int disable );
 static void menu_showphoto( KBNODE keyblock );
+static int menu_modusage( KBNODE keyblock, KBNODE sec_keyblock, int primary );
 
 static int update_trust=0;
 
@@ -1336,7 +1337,7 @@ enum cmdids
     cmdEXPIRE, cmdBACKSIGN, cmdENABLEKEY, cmdDISABLEKEY, cmdSHOWPREF,
     cmdSETPREF, cmdPREFKS, cmdNOTATION, cmdINVCMD, cmdSHOWPHOTO, cmdUPDTRUST,
     cmdCHKTRUST, cmdADDCARDKEY, cmdKEYTOCARD, cmdBKUPTOCARD, cmdCLEAN,
-    cmdMINIMIZE, cmdNOP
+    cmdMINIMIZE, cmdUSAGE, cmdNOP
   };
 
 static struct
@@ -1443,6 +1444,8 @@ static struct
       N_("compact unusable user IDs and remove unusable signatures from key")},
     { "minimize", cmdMINIMIZE  , KEYEDIT_NOT_SK,
       N_("compact unusable user IDs and remove all signatures from key") },
+    { "usage"   , cmdUSAGE     , KEYEDIT_NEED_SK,
+      N_("change usage flags on selected subkey(s)") },
     { NULL, cmdNONE, 0, NULL }
   };
 
@@ -2207,6 +2210,21 @@ keyedit_menu( const char *username, STRLIST locusr,
 	  case cmdMINIMIZE:
 	    if(menu_clean(keyblock,1))
 	      redisplay=modified=1;
+	    break;
+
+	  case cmdUSAGE:
+	    if( count_selected_keys (keyblock) == 0 )
+              modified = menu_modusage(keyblock, sec_keyblock, 1);
+	    else
+              modified = menu_modusage(keyblock, sec_keyblock, 0);
+            if( modified ) {
+              merge_keys_and_selfsig( sec_keyblock );
+              merge_keys_and_selfsig( keyblock );
+              run_subkey_warnings = 1;
+              sec_modified = 1;
+              modified = 1;
+              redisplay = 1;
+            }
 	    break;
 
 	  case cmdQUIT:
@@ -3566,16 +3584,148 @@ menu_addrevoker( KBNODE pub_keyblock, KBNODE sec_keyblock, int sensitive )
   return 0;
 }
 
+static int
+add_flags_and_expire( PKT_signature *sig, void *opaque )
+{
+  PKT_public_key *pk = opaque;
+
+  /* Do sig flags udpate -
+   * borrowed with some changes from do_add_key_flags() */
+  {
+    byte buf[1];
+
+    buf[0] = 0;
+
+    /* The spec says that all primary keys MUST be able to certify. */
+    if(sig->sig_class!=0x18)
+      buf[0] |= 0x01;
+
+    if (pk->pubkey_usage & PUBKEY_USAGE_CERT)
+      buf[0] |= 0x01;
+    if (pk->pubkey_usage & PUBKEY_USAGE_SIG)
+      buf[0] |= 0x02;
+    if (pk->pubkey_usage & PUBKEY_USAGE_ENC)
+      buf[0] |= 0x04 | 0x08;
+    if (pk->pubkey_usage & PUBKEY_USAGE_AUTH)
+      buf[0] |= 0x20;
+
+    build_sig_subpkt (sig, SIGSUBPKT_KEY_FLAGS, buf, 1);
+  }
+
+  return keygen_add_key_expire( sig, opaque );
+}
+
+static int
+update_sigs(KBNODE pub_keyblock, KBNODE sec_keyblock, PKT_secret_key *sk, int mainkey)
+{
+    PKT_public_key *main_pk, *sub_pk;
+    PKT_user_id *uid;
+    KBNODE node;
+    int signumber, rc;
+    u32 keyid[2];
+
+    main_pk = sub_pk = NULL;
+    uid = NULL;
+    signumber = 0;
+
+    for( node=pub_keyblock; node; node = node->next ) {
+	if( node->pkt->pkttype == PKT_PUBLIC_KEY ) {
+	    main_pk = node->pkt->pkt.public_key;
+	    keyid_from_pk( main_pk, keyid );
+	}
+	else if( node->pkt->pkttype == PKT_PUBLIC_SUBKEY
+		 && (node->flag & NODFLG_SELKEY ) ) {
+	    sub_pk = node->pkt->pkt.public_key;
+	}
+	else if( node->pkt->pkttype == PKT_USER_ID )
+	    uid = node->pkt->pkt.user_id;
+	else if( main_pk && node->pkt->pkttype == PKT_SIGNATURE
+		 && ( mainkey || sub_pk ) ) {
+	    PKT_signature *sig = node->pkt->pkt.signature;
+	    if( keyid[0] == sig->keyid[0] && keyid[1] == sig->keyid[1]
+		&& ( (mainkey && uid
+		      && uid->created && (sig->sig_class&~3) == 0x10)
+		     || (!mainkey && sig->sig_class == 0x18)  )
+		&& sig->flags.chosen_selfsig )
+	      {
+		/* this is a selfsignature which is to be replaced */
+		PKT_signature *newsig;
+		PACKET *newpkt;
+		KBNODE sn;
+		int signumber2 = 0;
+
+		signumber++;
+
+		if( (mainkey && main_pk->version < 4)
+		    || (!mainkey && sub_pk->version < 4 ) ) {
+		    log_info(_(
+			"You can't change the expiration date of a v3 key\n"));
+		    return 0;
+		}
+
+		/* find the corresponding secret self-signature */
+		for( sn=sec_keyblock; sn; sn = sn->next ) {
+		    if( sn->pkt->pkttype == PKT_SIGNATURE ) {
+			PKT_signature *b = sn->pkt->pkt.signature;
+			if( keyid[0] == b->keyid[0] && keyid[1] == b->keyid[1]
+			    && sig->sig_class == b->sig_class
+			    && ++signumber2 == signumber )
+			    break;
+		    }
+		}
+		if( !sn )
+		    log_info(_("No corresponding signature in secret ring\n"));
+
+		/* Note the potential oddity that the expiration date
+		   is calculated from the time when this function
+		   started ("timestamp"), but the signature is
+		   calculated from the time within
+		   update_keysig_packet().  On a slow or loaded
+		   machine, these two values may not match, making the
+		   expiration date off by a second or two. */
+		if( mainkey )
+		  rc = update_keysig_packet(&newsig, sig, main_pk, uid, NULL,
+					    sk, add_flags_and_expire, main_pk);
+		else
+		  rc = update_keysig_packet(&newsig, sig, main_pk, NULL, sub_pk,
+					    sk, add_flags_and_expire, sub_pk );
+		if( rc ) {
+		    log_error("make_keysig_packet failed: %s\n",
+						    g10_errstr(rc));
+		    return 0;
+		}
+
+		/* replace the packet */
+		newpkt = xmalloc_clear( sizeof *newpkt );
+		newpkt->pkttype = PKT_SIGNATURE;
+		newpkt->pkt.signature = newsig;
+		free_packet( node->pkt );
+		xfree( node->pkt );
+		node->pkt = newpkt;
+		if( sn ) {
+		    newpkt = xmalloc_clear( sizeof *newpkt );
+		    newpkt->pkttype = PKT_SIGNATURE;
+		    newpkt->pkt.signature = copy_signature( NULL, newsig );
+		    free_packet( sn->pkt );
+		    xfree( sn->pkt );
+		    sn->pkt = newpkt;
+		}
+		sub_pk = NULL;
+	    }
+	}
+    }
+
+    return signumber;
+}
+
 
 static int
 menu_expire( KBNODE pub_keyblock, KBNODE sec_keyblock )
 {
-    int n1, signumber, rc;
+    int n1, signumber;
     u32 expiredate;
     int mainkey=0;
     PKT_secret_key *sk;    /* copy of the main sk */
-    PKT_public_key *main_pk, *sub_pk;
-    PKT_user_id *uid;
     KBNODE node;
     u32 keyid[2];
     u32 timestamp=make_timestamp();
@@ -3606,103 +3756,24 @@ menu_expire( KBNODE pub_keyblock, KBNODE sec_keyblock )
     node = find_kbnode( sec_keyblock, PKT_SECRET_KEY );
     sk = copy_secret_key( NULL, node->pkt->pkt.secret_key);
 
-    /* Now we can actually change the self signature(s) */
-    main_pk = sub_pk = NULL;
-    uid = NULL;
-    signumber = 0;
+    /* Make the expiry changes */
     for( node=pub_keyblock; node; node = node->next ) {
 	if( node->pkt->pkttype == PKT_PUBLIC_KEY ) {
-	    main_pk = node->pkt->pkt.public_key;
-	    keyid_from_pk( main_pk, keyid );
-	    main_pk->expiredate = expiredate;
+	    keyid_from_pk( node->pkt->pkt.public_key, keyid );
+	    node->pkt->pkt.public_key->expiredate = expiredate;
 	}
 	else if( node->pkt->pkttype == PKT_PUBLIC_SUBKEY
 		 && (node->flag & NODFLG_SELKEY ) ) {
-	    sub_pk = node->pkt->pkt.public_key;
-	    sub_pk->expiredate = expiredate;
-	}
-	else if( node->pkt->pkttype == PKT_USER_ID )
-	    uid = node->pkt->pkt.user_id;
-	else if( main_pk && node->pkt->pkttype == PKT_SIGNATURE
-		 && ( mainkey || sub_pk ) ) {
-	    PKT_signature *sig = node->pkt->pkt.signature;
-	    if( keyid[0] == sig->keyid[0] && keyid[1] == sig->keyid[1]
-		&& ( (mainkey && uid
-		      && uid->created && (sig->sig_class&~3) == 0x10)
-		     || (!mainkey && sig->sig_class == 0x18)  )
-		&& sig->flags.chosen_selfsig )
-	      {
-		/* this is a selfsignature which is to be replaced */
-		PKT_signature *newsig;
-		PACKET *newpkt;
-		KBNODE sn;
-		int signumber2 = 0;
-
-		signumber++;
-
-		if( (mainkey && main_pk->version < 4)
-		    || (!mainkey && sub_pk->version < 4 ) ) {
-		    log_info(_(
-			"You can't change the expiration date of a v3 key\n"));
-		    free_secret_key( sk );
-		    return 0;
-		}
-
-		/* find the corresponding secret self-signature */
-		for( sn=sec_keyblock; sn; sn = sn->next ) {
-		    if( sn->pkt->pkttype == PKT_SIGNATURE ) {
-			PKT_signature *b = sn->pkt->pkt.signature;
-			if( keyid[0] == b->keyid[0] && keyid[1] == b->keyid[1]
-			    && sig->sig_class == b->sig_class
-			    && ++signumber2 == signumber )
-			    break;
-		    }
-		}
-		if( !sn )
-		    log_info(_("No corresponding signature in secret ring\n"));
-
-		/* Note the potential oddity that the expiration date
-		   is calculated from the time when this function
-		   started ("timestamp"), but the signature is
-		   calculated from the time within
-		   update_keysig_packet().  On a slow or loaded
-		   machine, these two values may not match, making the
-		   expiration date off by a second or two. */
-		if( mainkey )
-		  rc = update_keysig_packet(&newsig, sig, main_pk, uid, NULL,
-					    sk, keygen_add_key_expire, main_pk);
-		else
-		  rc = update_keysig_packet(&newsig, sig, main_pk, NULL, sub_pk,
-					    sk, keygen_add_key_expire, sub_pk );
-		if( rc ) {
-		    log_error("make_keysig_packet failed: %s\n",
-						    g10_errstr(rc));
-		    free_secret_key( sk );
-		    return 0;
-		}
-		/* replace the packet */
-		newpkt = xmalloc_clear( sizeof *newpkt );
-		newpkt->pkttype = PKT_SIGNATURE;
-		newpkt->pkt.signature = newsig;
-		free_packet( node->pkt );
-		xfree( node->pkt );
-		node->pkt = newpkt;
-		if( sn ) {
-		    newpkt = xmalloc_clear( sizeof *newpkt );
-		    newpkt->pkttype = PKT_SIGNATURE;
-		    newpkt->pkt.signature = copy_signature( NULL, newsig );
-		    free_packet( sn->pkt );
-		    xfree( sn->pkt );
-		    sn->pkt = newpkt;
-		}
-		sub_pk = NULL;
-	    }
+	    node->pkt->pkt.public_key->expiredate = expiredate;
 	}
     }
 
+    /* Now we can actually change the self signature(s) */
+    signumber = update_sigs(pub_keyblock, sec_keyblock, sk, mainkey);
+
     free_secret_key( sk );
     update_trust=1;
-    return 1;
+    return signumber > 0;
 }
 
 static int
@@ -5196,4 +5267,86 @@ menu_showphoto( KBNODE keyblock )
 	    }
 	}
     }
+}
+
+
+static void
+debugdump(KBNODE keyblock)
+{
+  KBNODE node;
+  PKT_public_key *pk = NULL;
+
+  for( node = keyblock; node; node = node->next ) {
+    if( !(node->pkt->pkttype == PKT_PUBLIC_KEY ||
+          node->pkt->pkttype == PKT_PUBLIC_SUBKEY))
+      continue;
+    pk = node->pkt->pkt.public_key;
+    tty_printf("! %c%s %s %s %s %s usage:%s\n",
+               node->flag & NODFLG_SELKEY ? '*' : ' ',
+               keystr_from_pk(pk),
+               node->pkt->pkttype == PKT_PUBLIC_KEY ? "pub" : "sub",
+	       pk->is_valid ? "  valid" : "invalid",
+	       pk->is_revoked ? "  revoked" : "unrevoked",
+	       pk->has_expired ? "  expired" : "unexpired",
+               usagestr_from_pk(pk));
+  }
+}
+
+static int
+menu_modusage( KBNODE keyblock, KBNODE sec_keyblock, int primary )
+{
+  KBNODE node;
+  PKT_public_key *pk = NULL;
+  PKT_secret_key *sk = NULL;
+  char prompt[128];
+  char *p, *new;
+  int ct;
+
+  debugdump(keyblock);
+
+  for( node = keyblock; node; node = node->next ) {
+    if( primary && node->pkt->pkttype != PKT_PUBLIC_KEY)
+      continue;
+
+    if( !primary && node->pkt->pkttype != PKT_PUBLIC_SUBKEY)
+      continue;
+
+    if( !primary && !(node->flag & NODFLG_SELKEY))
+      continue;
+
+    tty_printf("\n");
+
+    pk = node->pkt->pkt.public_key;
+    snprintf(prompt, sizeof(prompt),
+             _("Enter new usage flags (SCEA) for %s [currently %s]: "),
+            keystr_from_pk(pk), usagestr_from_pk(pk));
+    new = cpr_get("edit.usage", prompt);
+    for (p = new; p && *p; p++)
+      *p = tolower(*p);
+
+    if (strlen(new) == 0) {
+      tty_printf("No changes.\n");
+      continue;
+    }
+
+    pk->pubkey_usage &= ~(PUBKEY_USAGE_SIG | PUBKEY_USAGE_CERT |
+                          PUBKEY_USAGE_ENC | PUBKEY_USAGE_AUTH);
+    if (strchr(new, 's'))
+      pk->pubkey_usage |= PUBKEY_USAGE_SIG;
+    if (strchr(new, 'c'))
+      pk->pubkey_usage |= PUBKEY_USAGE_CERT;
+    if (strchr(new, 'e'))
+      pk->pubkey_usage |= PUBKEY_USAGE_ENC;
+    if (strchr(new, 'a'))
+      pk->pubkey_usage |= PUBKEY_USAGE_AUTH;
+  }
+  debugdump(keyblock);
+
+  node = find_kbnode( sec_keyblock, PKT_SECRET_KEY );
+  sk = copy_secret_key( NULL, node->pkt->pkt.secret_key);
+  ct = update_sigs(keyblock, sec_keyblock, sk, primary);
+
+  tty_printf("%d usages/signatures updated.\n", ct);
+  debugdump(keyblock);
+  return ct;
 }
